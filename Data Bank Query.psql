@@ -1,0 +1,100 @@
+/* A. Customer Nodes Exploration */
+
+Q1.  How many unique nodes are there on the Data Bank system?
+
+SELECT COUNT( DISTINCT (node_id)) as unique_nodes 
+FROM customer_nodes;
+
+Q2.   What is the number of nodes per region?
+ 
+ SELECT  
+   r.region_id, 
+   r.region_name,
+  COUNT(DISTINCT cn.node_id) AS num_nodes
+FROM customer_nodes cn
+JOIN regions r ON cn.region_id = r.region_id
+GROUP BY
+  r.region_id, r.region_name;
+
+Q3.  How many customers are allocated to each region?
+
+SELECT
+  r.region_id,
+  r.region_name,
+  COUNT(DISTINCT cn.customer_id) AS num_customers
+FROM customer_nodes cn
+JOIN regions r ON cn.region_id = r.region_id
+GROUP BY
+  r.region_id, r.region_name;
+
+Q4.  How many days on average are customers reallocated to a different node?
+
+SELECT
+  r.region_id,
+  r.region_name,
+  AVG(EXTRACT(DAY FROM cn.end_date::timestamp - cn.start_date::timestamp)) AS avg_reallocation_days
+FROM customer_nodes cn
+JOIN regions r ON cn.region_id = r.region_id
+GROUP BY r.region_id, r.region_name;
+
+Q5.  What is the median, 80th and 95th percentile for this same reallocation days metric for each region?
+
+SELECT
+  region_id,
+  region_name,
+  PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY reallocation_days) AS median,
+  PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY reallocation_days) AS percentile_80th,
+  PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY reallocation_days) AS percentile_95th
+FROM (
+  SELECT
+    r.region_id,
+    r.region_name,
+    EXTRACT(DAY FROM cn.end_date::timestamp - cn.start_date::timestamp) AS reallocation_days
+    FROM customer_nodes cn
+  JOIN regions r ON cn.region_id = r.region_id
+) AS subquery
+GROUP BY region_id, region_name;
+
+/*B. Customer Transactions*/ 
+
+Q1.  What is the unique count and total amount for each transaction type?
+
+SELECT
+  txn_type,
+  COUNT(DISTINCT customer_id) AS unique_count,
+  SUM(txn_amount) AS total_amount
+FROM customer_transactions
+GROUP BY txn_type;
+
+Q2.  What is the average total historical deposit counts and amounts for all customers?
+
+WITH deposit_info AS (
+  SELECT
+    customer_id,
+    COUNT(txn_type) AS deposit_count,
+    SUM(txn_amount) AS deposit_amount
+  FROM customer_transactions
+  WHERE txn_type = 'deposit'
+  GROUP BY customer_id
+)
+SELECT
+  ROUND(AVG(deposit_count), 1) AS avg_deposit_count,
+  ROUND(AVG(deposit_amount), 1) AS avg_deposit_amount
+FROM deposit_info;
+
+Q3.  What is the closing balance for each customer at the end of the month?
+
+SELECT
+  customer_id,
+  EXTRACT(MONTH FROM txn_date) AS txn_month,
+  EXTRACT(YEAR FROM txn_date) AS txn_year,
+  ROUND(SUM(CASE WHEN txn_type = 'deposit' THEN txn_amount
+                WHEN txn_type = 'withdrawal' THEN -txn_amount
+                ELSE 0 END) 
+        OVER (PARTITION BY customer_id, EXTRACT(MONTH FROM txn_date), EXTRACT(YEAR FROM txn_date) 
+              ORDER BY txn_date), 1) AS closing_balance
+FROM customer_transactions
+ORDER BY customer_id, txn_year, txn_month, txn_date;
+
+
+
